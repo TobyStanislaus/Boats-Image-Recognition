@@ -1,0 +1,7 @@
+path: /Users/toby/OneDrive/Documents/Github/Boats-Image-Recognition/data
+train: images
+val: images
+
+names:
+  0: boat
+  1: boat number
