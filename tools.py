@@ -4,11 +4,8 @@ from ultralytics import YOLO
 
 from sort.sort import *
 import easyocr
+import matplotlib.pyplot as plt
 
-# Create OCR reader
-reader = easyocr.Reader(['en'], gpu=False)
-
-boat_tracker = Sort()
 
 def load_model():
     model_path = os.path.join('.', 'runs', 'detect', 'train3', 'weights', 'last.pt')
@@ -16,7 +13,7 @@ def load_model():
     return model
 
 
-def process_image(model, image, threshold):
+def process_image(model, image, threshold, boat_tracker, reader):
     results = model(image)[0]
     detections = []
     ## All boats
@@ -40,22 +37,27 @@ def process_image(model, image, threshold):
         if score < threshold or class_id != 1:
             continue
 
-        xcar1, ycar1, scar2, ycar2, car_id = get_boat(result, boat_track_ids)
+        xcar1, ycar1, scar2, ycar2, boat_id = get_boat(result, boat_track_ids)
 
-        if car_id == -1:
+        if boat_id == -1:
             continue
 
         boatNumberCrop = image[int(y1):int(y2), int(x1):int(x2), :]
         boatNumberCropGray = cv2.cvtColor(boatNumberCrop, cv2.COLOR_BGR2GRAY)
         _, boatNumberCropThreshold = cv2.threshold(boatNumberCropGray, 80, 255, cv2.THRESH_BINARY_INV)
 
-        #resultImage = resize_image(boatNumberCropThreshold, scale_factor=5)
-        #show_image(resultImage)
+        
+        resultImage = resize_image(boatNumberCropThreshold, scale_factor=5)
+        show_image(resultImage)
 
-        boatNumberText, boatNumberTextScore = read_boat_number(boatNumberCropThreshold)
+        boatNumberText, boatNumberTextScore = read_boat_number(boatNumberCropThreshold, reader)
         print(boatNumberText)
 
+        image = draw_on_image(image, results, result)
+
+
     image = cv2.resize(image, (600, 600))
+
     return image
 
 
@@ -78,19 +80,20 @@ def get_boat(boatNumber, boat_track_ids):
     return -1, -1, -1, -1, -1
 
 
-def process_folder(input_dir):
+def process_folder(input_dir, threshold):
+    # Create OCR reader
+    num_reader = easyocr.Reader(['en'], gpu=True)
+    boat_tracker = Sort()
+
     model = load_model()
     imageFiles, image_extensions = fetch_img_files(input_dir)
-    threshold = 0.5
 
     for idx, file_name in enumerate(imageFiles):
         inputPath = os.path.join(input_dir, file_name)
         if inputPath.lower().endswith(image_extensions):
-            handle_image(inputPath, model, threshold)
+            handle_image(inputPath, model, threshold, boat_tracker, num_reader)
         else:
-            handle_video(inputPath, model, threshold)
-
-    cv2.destroyAllWindows()
+            handle_video(inputPath, model, threshold, boat_tracker, num_reader)
 
 
 def fetch_img_files(input_dir):
@@ -103,15 +106,16 @@ def fetch_img_files(input_dir):
 
 
 def show_image(image):
-    cv2.imshow("Output", image)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    plt.figure(figsize=(10, 10))
+    plt.imshow(image_rgb)
+    plt.axis('off')  # Hide the axes
+    plt.show()
 
-    if cv2.waitKey(0) & 0xFF == ord('q'):
-        return
 
-
-def handle_image(inputPath, model, threshold):
+def handle_image(inputPath, model, threshold, boat_tracker, num_reader):
     image = cv2.imread(inputPath)
-    modified_image = process_image(model, image, threshold)
+    modified_image = process_image(model, image, threshold, boat_tracker, num_reader)
     show_image(modified_image)
 
 
@@ -120,13 +124,22 @@ def resize_image(image, scale_factor):
     return image
 
 
-def read_boat_number(boatNumber):
+def draw_on_image(image, results, result):
+    x1, y1, x2, y2, score, class_id = result
+
+    cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 1)
+    cv2.putText(image, results.names[int(class_id)].upper(), (int(x1), int(y1)), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1, cv2.LINE_AA)
+    
+    return image
+
+
+def read_boat_number(boatNumber, reader):
 
     detections = reader.readtext(boatNumber)
     for detection in detections:
         bbox, text, score = detection
 
-        text = text.upper().remove(' ', '')
+        text = text.upper().replace(' ', '')
         if text != None:
             return clean_text(text), score
     return None, None
@@ -150,7 +163,7 @@ def clean_text(text):
     return resultText
 
 
-def handle_video(inputPath, model, threshold):
+def handle_video(inputPath, model, threshold, boat_tracker, num_reader):
     video_path_out = './data/results/resultVideo.mp4'
     cap = cv2.VideoCapture(inputPath)
     ret, frame = cap.read()
@@ -161,7 +174,7 @@ def handle_video(inputPath, model, threshold):
                       (600, 600))
     
     while ret:
-        modified_image = process_image(model, frame, threshold)
+        modified_image = process_image(model, frame, threshold, boat_tracker, num_reader)
         out.write(modified_image)
         
         ret, frame = cap.read()
