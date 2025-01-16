@@ -2,6 +2,13 @@ import os
 import cv2
 from ultralytics import YOLO
 
+from sort.sort import *
+import easyocr
+
+# Create OCR reader
+reader = easyocr.Reader(['en'], gpu=False)
+
+boat_tracker = Sort()
 
 def load_model():
     model_path = os.path.join('.', 'runs', 'detect', 'train3', 'weights', 'last.pt')
@@ -11,38 +18,153 @@ def load_model():
 
 def process_image(model, image, threshold):
     results = model(image)[0]
+    detections = []
+    ## All boats
     for result in results.boxes.data.tolist():
+        
         x1, y1, x2, y2, score, class_id = result
+        if score > threshold and class_id == 0:
 
-        if score > threshold:
-            cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
-            cv2.putText(image, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
-    
+            #cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
+            #cv2.putText(image, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
+                        #cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            detections.append([x1, y1, x2, y2, score])
+
+
+    boat_track_ids = boat_tracker.update(np.asarray(detections))
+
+    ##All boat numbers
+    for result in results.boxes.data.tolist():
+
+        x1, y1, x2, y2, score, class_id = result
+        if score < threshold or class_id != 1:
+            continue
+
+        xcar1, ycar1, scar2, ycar2, car_id = get_boat(result, boat_track_ids)
+
+        if car_id == -1:
+            continue
+
+        boatNumberCrop = image[int(y1):int(y2), int(x1):int(x2), :]
+        boatNumberCropGray = cv2.cvtColor(boatNumberCrop, cv2.COLOR_BGR2GRAY)
+        _, boatNumberCropThreshold = cv2.threshold(boatNumberCropGray, 80, 255, cv2.THRESH_BINARY_INV)
+
+        #resultImage = resize_image(boatNumberCropThreshold, scale_factor=5)
+        #show_image(resultImage)
+
+        boatNumberText, boatNumberTextScore = read_boat_number(boatNumberCropThreshold)
+        print(boatNumberText)
+
     image = cv2.resize(image, (600, 600))
-    cv2.imshow("Output", image)
+    return image
 
-    if cv2.waitKey(0) & 0xFF == ord('q'):  # Press 'q' to quit early
-        return
 
-###Image processing
-def process_images(input_dir):
+def get_boat(boatNumber, boat_track_ids):
+    x1, y1, x2, y2, score, class_id= boatNumber
+
+
+    foundIt = False
+    for j in range(len(boat_track_ids)):
+        xcar1, ycar1, xcar2, ycar2, carID = boat_track_ids[j]
+
+        if x1 > xcar1 and y1 > ycar1 and x2 < xcar2 and y2 < ycar2:
+            car_index = j
+            foundIt = True
+            break
+
+    if foundIt:
+        return boat_track_ids[car_index]
+    
+    return -1, -1, -1, -1, -1
+
+
+def process_folder(input_dir):
     model = load_model()
-    image_files = fetch_img_files(input_dir)
+    imageFiles, image_extensions = fetch_img_files(input_dir)
     threshold = 0.5
 
-    for idx, file_name in enumerate(image_files):
-        input_path = os.path.join(input_dir, file_name)
-
-        # Read the image
-        image = cv2.imread(input_path)
-        process_image(model, image, threshold)
+    for idx, file_name in enumerate(imageFiles):
+        inputPath = os.path.join(input_dir, file_name)
+        if inputPath.lower().endswith(image_extensions):
+            handle_image(inputPath, model, threshold)
+        else:
+            handle_video(inputPath, model, threshold)
 
     cv2.destroyAllWindows()
 
 
 def fetch_img_files(input_dir):
-    files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
-    image_files = [f for f in files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp'))]
-    return image_files
+    image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp')
+    video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.wmv')
 
+    files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+    img_files = [f for f in files if f.lower().endswith(image_extensions+video_extensions)]
+    return img_files, image_extensions
+
+
+def show_image(image):
+    cv2.imshow("Output", image)
+
+    if cv2.waitKey(0) & 0xFF == ord('q'):
+        return
+
+
+def handle_image(inputPath, model, threshold):
+    image = cv2.imread(inputPath)
+    modified_image = process_image(model, image, threshold)
+    show_image(modified_image)
+
+
+def resize_image(image, scale_factor):
+    image = cv2.resize(image, (image.shape[:2][1]*scale_factor, image.shape[:2][0]*scale_factor), interpolation=cv2.INTER_LINEAR)
+    return image
+
+
+def read_boat_number(boatNumber):
+
+    detections = reader.readtext(boatNumber)
+    for detection in detections:
+        bbox, text, score = detection
+
+        text = text.upper().remove(' ', '')
+        if text != None:
+            return clean_text(text), score
+    return None, None
+
+
+def clean_text(text):
+    dict_char_to_int = {'O': '0',
+                    'I': '1',
+                    'J': '3',
+                    'A': '4',
+                    'G': '6',
+                    'S': '5'}
+    
+    resultText = ''
+    for letter in text:
+        if letter in dict_char_to_int:
+            resultText += dict_char_to_int[letter]
+        else:
+            resultText += letter
+
+    return resultText
+
+
+def handle_video(inputPath, model, threshold):
+    video_path_out = './data/results/resultVideo.mp4'
+    cap = cv2.VideoCapture(inputPath)
+    ret, frame = cap.read()
+
+    out = cv2.VideoWriter(video_path_out, 
+                      cv2.VideoWriter_fourcc(*'mp4v'), 
+                      int(cap.get(cv2.CAP_PROP_FPS)), 
+                      (600, 600))
+    
+    while ret:
+        modified_image = process_image(model, frame, threshold)
+        out.write(modified_image)
+        
+        ret, frame = cap.read()
+
+    cap.release()
+    out.release()

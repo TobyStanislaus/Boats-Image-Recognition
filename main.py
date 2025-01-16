@@ -1,8 +1,6 @@
 from tools import *
 
+test_images_path = "./data/testing/boats"
 
-test_images_path = "./data/testing"
-
-process_images(test_images_path)
-
+process_folder(test_images_path)
 
