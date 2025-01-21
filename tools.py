@@ -7,7 +7,7 @@ import easyocr
 import matplotlib.pyplot as plt
 
 ##Image detection pipeline
-def process_folder(input_dir, model_name, threshold):
+def process_folder(input_dir, model_name, threshold, preferences):
     # Create OCR reader
     num_reader = easyocr.Reader(['en'], gpu=True)
     
@@ -18,9 +18,9 @@ def process_folder(input_dir, model_name, threshold):
     for idx, file_name in enumerate(imageFiles):
         inputPath = os.path.join(input_dir, file_name)
         if inputPath.lower().endswith(image_extensions):
-            handle_image(inputPath, model, threshold, None, num_reader)
+            handle_image(inputPath, model, threshold, None, num_reader, preferences)
         else:
-            handle_video(inputPath, model, threshold, num_reader)
+            handle_video(inputPath, model, threshold, num_reader, preferences)
 
 
 def load_model(model_name):
@@ -38,16 +38,34 @@ def fetch_img_files(input_dir):
     return img_files, image_extensions
 
 
-def handle_image(inputPath, model, threshold, boat_tracker, num_reader):
+def handle_image(inputPath, model, threshold, boat_tracker, num_reader, preferences):
     image = cv2.imread(inputPath)
-    modified_image = process_image(model, image, threshold, boat_tracker, num_reader)
-    show_image(modified_image)
+    modified_image = process_image(model, image, threshold, boat_tracker, num_reader, preferences)
 
 
-def process_image(model, image, threshold, boat_tracker, reader):
+def process_image(model, image, threshold, boat_tracker, reader, preferences):
+    showImg, showCrop = preferences
     results = model(image)[0]
+    boat_track_ids = None
+
+    detections = handle_boat_coords(image, results, threshold)
+
+    if boat_tracker:
+        boat_track_ids = boat_tracker.update(np.asarray(detections))
+
+    text = handle_boat_num_coords(image, results, threshold, boat_track_ids, reader, showCrop)
+
+
+    image = cv2.resize(image, (600, 600))
+    if showImg:
+        show_image(image)
+
+    return image
+
+
+def handle_boat_coords(image, results, threshold):
     detections = []
-    ## All boats
+
     for result in results.boxes.data.tolist():
         
         x1, y1, x2, y2, score, class_id = result
@@ -58,36 +76,33 @@ def process_image(model, image, threshold, boat_tracker, reader):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
             detections.append([x1, y1, x2, y2, score])
 
-    if boat_tracker:
-        boat_track_ids = boat_tracker.update(np.asarray(detections))
+    return detections
 
-    ##All boat numbers
+
+def handle_boat_num_coords(image, results, threshold, boat_track_ids, reader, showCrop):
+    boatNums = []
     for result in results.boxes.data.tolist():
-
+        x1, y1, x2, y2, score, class_id = result
         if score < threshold or class_id != 1:
             continue
 
 
-        if boat_id == -1:
-            continue
-        
-        xcar1, ycar1, scar2, ycar2, boat_id = get_boat(result, boat_track_ids)
+        if boat_track_ids:
+            xcar1, ycar1, scar2, ycar2, boat_id = get_boat(result, boat_track_ids)
 
+        ##Cropping, reading and drawing on image
         boatNumberCropThreshold = crop_image(image, result)
-
-
-        resultImage = resize_image(boatNumberCropThreshold, scale_factor=5)
-        #show_image(resultImage)
-
         boatNumberText, boatNumberTextScore = read_boat_number(boatNumberCropThreshold, reader)
-        print(boatNumberText)
-
         image = draw_on_image(image, results, result)
 
+        resultImage = resize_image(boatNumberCropThreshold, scale_factor=5)
+        if showCrop:
+            show_image(boatNumberCropThreshold)
 
-    image = cv2.resize(image, (600, 600))
+        print(boatNumberText)
+        boatNums.append(boatNumberText)
 
-    return image
+    return boatNumberText
 
 
 def get_boat(boatNumber, boat_track_ids):
@@ -126,7 +141,7 @@ def crop_image(image, result):
     x1, y1, x2, y2, score, class_id = result
     boatNumberCrop = image[int(y1):int(y2), int(x1):int(x2), :]
     boatNumberCropGray = cv2.cvtColor(boatNumberCrop, cv2.COLOR_BGR2GRAY)
-    _, boatNumberCropThreshold = cv2.threshold(boatNumberCropGray, 150, 255, cv2.THRESH_BINARY_INV)
+    _, boatNumberCropThreshold = cv2.threshold(boatNumberCropGray, 100, 255, cv2.THRESH_BINARY_INV)
 
     return boatNumberCropThreshold
 
@@ -141,7 +156,6 @@ def draw_on_image(image, results, result):
 
 
 def read_boat_number(boatNumber, reader):
-    #show_image(boatNumber)
     detections = reader.readtext(boatNumber)
     best_guess = ''
 
@@ -172,7 +186,7 @@ def clean_text(text):
     return resultText
 
 
-def handle_video(inputPath, model, threshold, num_reader):
+def handle_video(inputPath, model, threshold, reader, preferences):
     boat_tracker = Sort()
     video_path_out = './data/results/resultVideo.mp4'
     cap = cv2.VideoCapture(inputPath)
@@ -184,7 +198,7 @@ def handle_video(inputPath, model, threshold, num_reader):
                       (600, 600))
     
     while ret:
-        modified_image = process_image(model, frame, threshold, boat_tracker, num_reader)
+        modified_image = process_image(model, frame, threshold, boat_tracker, reader, preferences)
         out.write(modified_image)
         
         ret, frame = cap.read()
