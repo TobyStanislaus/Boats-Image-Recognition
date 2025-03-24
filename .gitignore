@@ -10,7 +10,7 @@ data/labels.cache
 data/labels.txt
 
 datasets/
-runs/
+
 
 # Ignore logs and temporary files
 *.log
