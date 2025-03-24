@@ -1,8 +1,10 @@
 # Boats-Image-Recognition
 Recognising types of boats from a picture for EPQ artefact
 
+### PREREQUISITES
+Python 3.10-3.11
+
 ### INSTALLATION
-Download Python (if not already)
 
 Go to command line, by typing in 'cmd' in start.
 
@@ -14,6 +16,5 @@ cd Boats-Image-Recognition
 
 ## Installing Dependencies
 
-pip install opencv-python
 pip install ultralytics
-pip install sort-tracker
+pip install easyocr
