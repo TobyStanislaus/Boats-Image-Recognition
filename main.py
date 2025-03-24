@@ -7,10 +7,11 @@ threshold = 0.1
 
 showImg = False
 showCrop = False
+useWebCam = False
 
 preferences = [showImg, showCrop]
 
 start_time = time.time()
-process_folder(test_images_path, model_name, threshold, preferences)
+process_folder(test_images_path, model_name, threshold, preferences, useWebCam)
 end_time = time.time()
-print(end_time-start_time)
+print('Time Taken:',end_time-start_time)
