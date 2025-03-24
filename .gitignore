@@ -3,7 +3,12 @@ __pycache__/
 *.py[cod]
 
 # Ignore data directories
-data/
+data/images/
+data/labels/
+data/testing cache/
+data/labels.cache
+data/labels.txt
+
 datasets/
 runs/
 

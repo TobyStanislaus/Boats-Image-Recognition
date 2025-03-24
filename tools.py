@@ -9,17 +9,21 @@ import matplotlib.pyplot as plt
 import csv
 
 ##Image detection pipeline
-def process_folder(input_dir, model_name, threshold, preferences):
+def process_folder(input_dir, model_name, threshold, preferences, live_feed):
     # Create OCR reader
     num_reader = easyocr.Reader(['en'], gpu=True)
     model = load_model(model_name)
     boatDict = load_csv_to_dict('database\sailing_results.csv')
     imageFiles, image_extensions = fetch_img_files(input_dir)
 
+    if live_feed:
+        process_live_feed(model, threshold, None, num_reader, preferences, boatDict)
+
     for idx, file_name in enumerate(imageFiles):
         inputPath = os.path.join(input_dir, file_name)
         if inputPath.lower().endswith(image_extensions):
-            handle_image(inputPath, model, threshold, None, num_reader, preferences, boatDict)
+            modified_image = handle_image(inputPath, model, threshold, None, num_reader, preferences, boatDict)
+            cv2.imwrite(f'./data/results/{file_name}', modified_image)
         else:
             handle_video(inputPath, model, threshold, num_reader, preferences, boatDict)
 
@@ -42,6 +46,7 @@ def fetch_img_files(input_dir):
 def handle_image(inputPath, model, threshold, boat_tracker, num_reader, preferences, boatDict):
     image = cv2.imread(inputPath)
     modified_image = process_image(model, image, threshold, boat_tracker, num_reader, preferences, boatDict)
+    return modified_image
 
 
 def process_image(model, image, threshold, boat_tracker, reader, preferences, boatDict):
@@ -96,17 +101,16 @@ def handle_boat_num_coords(image, results, threshold, boat_track_ids, reader, sh
         if score < threshold or class_id != 1:
             continue
 
-        if boat_track_ids is not None:
-            xcar1, ycar1, scar2, ycar2, boat_id = get_boat(result, boat_track_ids)
 
         ##Cropping, reading and drawing on image
         boatNumberCropThreshold = crop_image(image, result)
         boatNumberText, boatNumberTextScore = read_boat_number(boatNumberCropThreshold, reader)
 
         font_scale, thickness = customize_size(image)
-        coords = centre_text(boatNumberText, font_scale, thickness, result)
-
-        cv2.putText(image, boatNumberText, coords, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thickness, cv2.LINE_AA)
+        coords, lcoords = centre_text(boatNumberText, font_scale, thickness, result)
+        
+        if boatNumberText:
+            cv2.putText(image, boatNumberText, lcoords, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thickness, cv2.LINE_AA)
 
         image = draw_on_image(image, result, results, colour=(255, 0, 0))
 
@@ -114,8 +118,9 @@ def handle_boat_num_coords(image, results, threshold, boat_track_ids, reader, sh
         if showCrop:
             show_image(boatNumberCropThreshold)
 
-        boatNumberText = check_boat_number(boatNumberText, boatDict, results.names[int(class_id)].upper())
-        if boatNumberText:
+        boatNumberText = check_boat_number(boatNumberText, boatDict, boatNumberTextScore)
+
+        if boatNumberText and boatNumberText in boatDict:
             cv2.putText(image, boatDict[boatNumberText]['Helm Name'], coords, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (207, 159, 255), thickness, cv2.LINE_AA)
 
         boatNums.append(boatNumberText)
@@ -213,7 +218,7 @@ def clean_text(text):
     return resultText
 
 
-def handle_video(inputPath, model, threshold, reader, preferences, boatDict):
+def handle_video(inputPath, model, threshold, num_reader, preferences, boatDict):
 
     boat_tracker = Sort()
     video_path_out = inputPath.replace('/testing\\', '/results/')
@@ -230,13 +235,22 @@ def handle_video(inputPath, model, threshold, reader, preferences, boatDict):
                       (width, height))
     
     while ret:
-        modified_image = process_image(model, frame, threshold, boat_tracker, reader, preferences, boatDict)
+        modified_image = process_image(model, frame, threshold, boat_tracker, num_reader, preferences, boatDict)
         out.write(modified_image)
         
         ret, frame = cap.read()
 
     cap.release()
     out.release()
+
+
+def process_live_feed(model, threshold, boat_tracker, num_reader, preferences, boatDict):
+    cap = cv2.VideoCapture(0)
+
+    while True:
+        ret, frame = cap.read()
+        #modified_image = process_image(inputPath, model, threshold, boat_tracker, num_reader, preferences, boatDict)
+        show_image(frame)
 
 
 def customize_size(image):
@@ -257,10 +271,12 @@ def centre_text(boatNumberText, font_scale, thickness, result):
     text_width, text_height = text_size
     box_center_x = int((x1 + x2) / 2)
     
-    text_x = int(box_center_x - text_width / 2)
-    text_y = int(max(y1 - 5, text_height))
+    text_x_upper = int(box_center_x - text_width / 2)
+    text_y_upper = int(max(y1 - 5, text_height))  
+    text_x_lower = int(text_x_upper)
+    text_y_lower = int(y2 + text_height + 5)
 
-    return (text_x, text_y)
+    return (text_x_upper, text_y_upper), (text_x_lower, text_y_lower)
 
 
 def load_csv_to_dict(csv_path):
@@ -277,15 +293,31 @@ def load_csv_to_dict(csv_path):
                 
     return boat_data
 
-def check_boat_number(boatNumberText, boatDict, boat_type):
-    if len(boatNumberText)>2:
+
+def check_boat_number(boatNumberText, boatDict, confidence):
+    if not boatNumberText.isdigit():
+        return None
+
+    if len(boatNumberText) > 2:
+        save_boat_data(boatNumberText, boatDict)
         return boatNumberText
     else:
-        if boatNumberText in boatDict and boatNumberText.isdigit() and boatDict[boatNumberText]['Boat Type'] == boat_type:
+        if boatNumberText in boatDict and confidence >= 0.8:
+            save_boat_data(boatNumberText, boatDict)
             return boatNumberText
         return None
-        
-    
 
 
-  
+def save_boat_data(boatNumberText, boatDict):
+
+    with open("race_data.txt", "r") as file:
+        existing_data = file.readlines()
+
+    for line in existing_data:
+        if boatNumberText in line:
+            return
+
+    with open("race_data.txt", "a") as file:
+        if boatNumberText in boatDict:
+            helm_name = boatDict.get(boatNumberText, {}).get('Helm Name', 'Unknown')
+            file.write(f"Boat Number: {boatNumberText}, Helm Name: {helm_name}\n")
