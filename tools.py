@@ -2,7 +2,6 @@ import os
 import cv2
 from ultralytics import YOLO
 
-from sort.sort import *
 import easyocr
 import matplotlib.pyplot as plt
 
@@ -22,7 +21,7 @@ def process_folder(input_dir, model_name, threshold, preferences, live_feed):
     for idx, file_name in enumerate(imageFiles):
         inputPath = os.path.join(input_dir, file_name)
         if inputPath.lower().endswith(image_extensions):
-            modified_image = handle_image(inputPath, model, threshold, None, num_reader, preferences, boatDict)
+            modified_image = handle_image(inputPath, model, threshold, num_reader, preferences, boatDict)
             cv2.imwrite(f'./data/results/{file_name}', modified_image)
         else:
             handle_video(inputPath, model, threshold, num_reader, preferences, boatDict)
@@ -43,21 +42,20 @@ def fetch_img_files(input_dir):
     return img_files, image_extensions
 
 
-def handle_image(inputPath, model, threshold, boat_tracker, num_reader, preferences, boatDict):
+def handle_image(inputPath, model, threshold, num_reader, preferences, boatDict):
     image = cv2.imread(inputPath)
-    modified_image = process_image(model, image, threshold, boat_tracker, num_reader, preferences, boatDict)
+    modified_image = process_image(model, image, threshold, num_reader, preferences, boatDict)
     return modified_image
 
 
-def process_image(model, image, threshold, boat_tracker, reader, preferences, boatDict):
+def process_image(model, image, threshold,  reader, preferences, boatDict):
     showImg, showCrop = preferences
     results = model(image, verbose=False)[0]
     boat_track_ids = None
 
     detections = handle_boat_coords(image, results, threshold)
 
-    if boat_tracker:
-        boat_track_ids = boat_tracker.update(np.asarray(detections))
+
 
     text = handle_boat_num_coords(image, results, threshold, boat_track_ids, reader, showCrop, boatDict)
 
@@ -220,7 +218,7 @@ def clean_text(text):
 
 def handle_video(inputPath, model, threshold, num_reader, preferences, boatDict):
 
-    boat_tracker = Sort()
+
     video_path_out = inputPath.replace('/testing\\', '/results/')
     #video_path_out = './data/results/resultVideo.mp4'
     cap = cv2.VideoCapture(inputPath)
@@ -235,7 +233,7 @@ def handle_video(inputPath, model, threshold, num_reader, preferences, boatDict)
                       (width, height))
     
     while ret:
-        modified_image = process_image(model, frame, threshold, boat_tracker, num_reader, preferences, boatDict)
+        modified_image = process_image(model, frame, threshold, num_reader, preferences, boatDict)
         out.write(modified_image)
         
         ret, frame = cap.read()
@@ -244,12 +242,12 @@ def handle_video(inputPath, model, threshold, num_reader, preferences, boatDict)
     out.release()
 
 
-def process_live_feed(model, threshold, boat_tracker, num_reader, preferences, boatDict):
+def process_live_feed(model, threshold, num_reader, preferences, boatDict):
     cap = cv2.VideoCapture(0)
 
     while True:
         ret, frame = cap.read()
-        #modified_image = process_image(inputPath, model, threshold, boat_tracker, num_reader, preferences, boatDict)
+        #modified_image = process_image(inputPath, model, threshold, num_reader, preferences, boatDict)
         show_image(frame)
 
 
