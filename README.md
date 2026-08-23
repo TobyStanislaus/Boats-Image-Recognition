@@ -139,11 +139,9 @@ This enables the system to go beyond identifying the type of boat and extract in
 
 ### Requirements
 
-* Python 3.10–3.11
+* Python 3.10+
 * Ultralytics
 * EasyOCR
-
-The original project specifies Python 3.10–3.11 as its supported versions.
 
 Clone the repository:
 
